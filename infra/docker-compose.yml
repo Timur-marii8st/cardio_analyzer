@@ -1,0 +1,109 @@
+version: "3.8"
+
+services:
+  db:
+    image: timescale/timescaledb:2.14.2-pg15
+    environment:
+      - POSTGRES_USER=ctg
+      - POSTGRES_PASSWORD=ctg
+      - POSTGRES_DB=ctg
+    ports:
+      - "5432:5432"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ctg"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - ctg-network
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes --maxmemory 2gb --maxmemory-policy allkeys-lru
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    restart: unless-stopped
+    networks:
+      - ctg-network
+
+  api:
+    build:
+      context: ../
+      dockerfile: infra/docker/Dockerfile.api
+    environment:
+      - DATABASE_URL=postgresql+psycopg://ctg:ctg@db:5432/ctg
+      - REDIS_URL=redis://redis:6379/0
+      - ARTIFACTS_PATH=/app/artifacts/model.joblib
+      - SECRET_KEY=${SECRET_KEY:-CHANGE_THIS_SECRET_KEY_IN_PRODUCTION_MIN_32_CHARS}
+      - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost}
+      - DEBUG=false
+    volumes:
+      - ../artifacts:/app/artifacts
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+    networks:
+      - ctg-network
+
+  worker:
+    build:
+      context: ../
+      dockerfile: infra/docker/Dockerfile.worker
+    environment:
+      - DATABASE_URL=postgresql+psycopg://ctg:ctg@db:5432/ctg
+      - REDIS_URL=redis://redis:6379/0
+      - ARTIFACTS_PATH=/app/artifacts/model.joblib
+    volumes:
+      - ../artifacts:/app/artifacts
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - ctg-network
+
+  ui:
+    build:
+      context: ../apps/ui
+      dockerfile: ../../infra/docker/Dockerfile.ui
+    ports:
+      - "80:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - ctg-network
+
+volumes:
+  db_data:
+  redis_data:
+
+networks:
+  ctg-network:
+    driver: bridge

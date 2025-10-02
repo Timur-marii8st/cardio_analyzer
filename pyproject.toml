@@ -1,0 +1,39 @@
+
+[project]
+name = "cardio_analyzer"
+version = "0.1.0"
+description = ""
+authors = [
+    {name = "Timur-marii8st",email = "4gg528@gmail.com"}
+]
+readme = "README.md"
+requires-python = ">=3.13,<3.14"
+dependencies = []
+
+[tool.poetry]
+packages = [{include = "retail_analytics", from = "src"}]
+
+[tool.poetry.dependencies]
+python = ">=3.13,<3.14"
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+pydantic==2.9.2
+pydantic-settings==2.5.2
+numpy==2.1.1
+pandas==2.2.2
+polars==1.9.0
+scikit-learn==1.5.2
+lightgbm==4.5.0
+optuna==3.6.1
+joblib==1.4.2
+typer==0.12.5
+SQLAlchemy==2.0.36
+psycopg[binary]==3.2.3
+python-dotenv==1.0.1
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.1.1"
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
