@@ -114,8 +114,8 @@ class MLSettings(BaseModel):
     resample_every: str = "250ms"
 
     # Realtime
-    feature_window_sec: int = 60
-    min_window_points: int = 240
+    feature_window_sec: int = 600
+    min_window_points: int = 1200
 
     class Config:
         extra = "forbid"

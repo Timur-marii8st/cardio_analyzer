@@ -5,6 +5,7 @@ from typing import Optional
 
 from ..deps import get_storage, get_streaming_service
 from ..auth import AuthService # Импортируем сам сервис
+from .adapters import replace_nan_with_none
 
 router = APIRouter(prefix="/v1", tags=["stream"])
 logger = logging.getLogger(__name__)
@@ -26,7 +27,6 @@ async def ws_stream(
             await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Missing token")
             return
 
-        # Проверяем токен. Если он невалиден, verify_token выбросит HTTPException.
         token_data = auth_service.verify_token(token)
         logger.info(f"WebSocket connected for user {token_data.email} on session {session_id}")
 
@@ -44,7 +44,8 @@ async def ws_stream(
         while True:
             result = streaming.tick(session_id)
             if result:
-                await websocket.send_text(json.dumps(result, ensure_ascii=False, default=str))
+                cleaned_result = replace_nan_with_none(result)
+                await websocket.send_text(json.dumps(cleaned_result, ensure_ascii=False, default=str))
                 if result.get("risk"):
                     storage.save_risk(
                         session_id, 

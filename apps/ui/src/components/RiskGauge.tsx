@@ -16,7 +16,7 @@ const RiskGauge: React.FC<Props> = ({ prob }) => {
         splitLine: { length: 10, lineStyle: { width: 2 } },
         axisLabel: { distance: 10 },
         pointer: { length: "60%" },
-        detail: { valueAnimation: true, formatter: "{value}%" },
+        detail: { valueAnimation: true, formatter: (value: number) => `${value.toFixed(1)}%`, offsetCenter: ['0%', '90%']},
         data: [{ value: val }]
       }
     ],

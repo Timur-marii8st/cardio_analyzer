@@ -20,7 +20,7 @@ class ApiSettings(BaseSettings):
     
     # Database
     database_url: str = Field(
-        ...,  # Required!
+        ...,
         description="PostgreSQL connection string"
     )
     

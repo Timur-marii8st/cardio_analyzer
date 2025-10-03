@@ -36,6 +36,12 @@ class StreamingServiceRedis:
             if result:
                 logger.debug(f"Processing step completed for session {session_id}")
             return result
+        except ValueError as e:
+            if "All-NaN slice" in str(e):
+                logger.warning(f"Insufficient data for session {session_id}: {e}")
+                return None  # Return None instead of crashing
+            logger.error(f"Error processing session {session_id}: {e}")
+            raise
         except Exception as e:
             logger.error(f"Error processing session {session_id}: {e}")
             raise

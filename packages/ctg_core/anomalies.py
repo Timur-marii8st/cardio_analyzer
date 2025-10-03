@@ -62,16 +62,38 @@ def detect_anomalies(df: pd.DataFrame) -> Dict:
 
     # Кросс-корреляция UA vs -BPM (ограниченный лаг ±120 c)
     max_lag = int(120 * F)
-    if len(ua) > 2 * max_lag + 1:
-        x = (ua - np.nanmean(ua))
-        y = -(bpm - np.nanmean(bpm))
-        x = x / (np.nanstd(x) + 1e-6)
-        y = y / (np.nanstd(y) + 1e-6)
-        corr = np.correlate(x, y, mode="full") / len(x)
-        lags = np.arange(-len(x)+1, len(x))
-        mask = (lags >= -max_lag) & (lags <= max_lag)
-        corr = corr[mask]; lags = lags[mask]
-        best_i = int(np.nanargmax(corr))
-        out["crosscorr_max"] = float(corr[best_i])
-        out["crosscorr_lag_s"] = float(lags[best_i] / F)
+    
+    # ADD THIS CHECK: Only calculate if we have valid UA data
+    has_valid_ua = np.isfinite(ua).any() and len(ua) > 2 * max_lag + 1
+    has_valid_bpm = np.isfinite(bpm).any() and len(bpm) > 2 * max_lag + 1
+    
+    if has_valid_ua and has_valid_bpm:
+        try:
+            x = (ua - np.nanmean(ua))
+            y = -(bpm - np.nanmean(bpm))
+            
+            x_std = np.nanstd(x)
+            y_std = np.nanstd(y)
+            
+            # Only proceed if we have non-zero standard deviations
+            if x_std > 1e-6 and y_std > 1e-6:
+                x = x / (x_std + 1e-6)
+                y = y / (y_std + 1e-6)
+                
+                corr = np.correlate(x, y, mode="full") / len(x)
+                lags = np.arange(-len(x)+1, len(x))
+                mask = (lags >= -max_lag) & (lags <= max_lag)
+                corr = corr[mask]
+                lags = lags[mask]
+                
+                # Check if corr has any finite values
+                if np.isfinite(corr).any():
+                    best_i = int(np.nanargmax(corr))
+                    out["crosscorr_max"] = float(corr[best_i])
+                    out["crosscorr_lag_s"] = float(lags[best_i] / F)
+        except Exception as e:
+            # Log but don't crash
+            import logging
+            logging.warning(f"Cross-correlation calculation failed: {e}")
+    
     return out

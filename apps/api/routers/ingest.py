@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException, Depends
 from packages.ctg_core.schemas import IngestBatch, RiskOutput
 from ..deps import get_storage, get_streaming_service
 from datetime import datetime, timezone
+from .adapters import replace_nan_with_none
 
 router = APIRouter(prefix="/v1", tags=["ingest"])
 
@@ -30,7 +31,7 @@ def ingest_batch(
     if result and result.get("decel_events"):
         storage.save_new_decel_events(batch.session_id, result["decel_events"])
     
-    return {"ok": True, "result": result}
+    return {"ok": True, "result": replace_nan_with_none(result)}
 
 @router.get("/sessions/{session_id}/risk", response_model=RiskOutput)
 def get_risk(

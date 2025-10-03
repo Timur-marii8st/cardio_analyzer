@@ -1,3 +1,5 @@
+# File: packages/ctg_core/realtime_redis.py
+
 from __future__ import annotations
 from typing import Dict, Optional
 from datetime import datetime, timedelta, timezone
@@ -9,10 +11,13 @@ from .processing import resample_uniform, basic_qc, rolling_baseline
 from .features import compute_ctg_features_window
 from .anomalies import detect_anomalies
 from .session_manager import RedisSessionManager
+import logging
+
+logger = logging.getLogger(__name__)
 
 class RealtimeProcessorRedis:
     """
-    Обновленная версия RealtimeProcessor, использующая Redis для хранения состояния.
+    RealtimeProcessor, использующая Redis для хранения состояния.
     Это решает проблему масштабирования при использовании нескольких воркеров.
     """
     
@@ -71,55 +76,61 @@ class RealtimeProcessorRedis:
         Returns:
             Словарь с результатами или None если недостаточно данных
         """
-        # Получаем буферы из Redis
         df_bpm, df_ua = self.session_manager.get_session_buffers_as_dataframes(session_id)
+
+        if df_bpm.empty:
+            return None
+
+        # BEGIN MODIFICATION: Add a minimum duration check
+        # This prevents processing stale, incomplete data left in Redis on app load.
+        min_duration_for_analysis_sec = 180  # Require at least 3 minutes of data
+        
+        earliest_ts = df_bpm["ts"].min()
+        latest_ts = df_bpm["ts"].max()
+        duration_sec = (latest_ts - earliest_ts).total_seconds()
+
+        if duration_sec < min_duration_for_analysis_sec:
+            logger.warning(
+                f"Session {session_id}: Insufficient data duration ({duration_sec:.0f}s). "
+                f"Waiting for at least {min_duration_for_analysis_sec}s."
+            )
+            return None
+        # END MODIFICATION
+
+        window_start_ts = latest_ts - timedelta(seconds=ml_settings.feature_window_sec)
+
+        df_bpm = df_bpm[df_bpm["ts"] >= window_start_ts]
+        if not df_ua.empty:
+            df_ua = df_ua[df_ua["ts"] >= window_start_ts]
         
         if df_bpm.empty:
             return None
         
-        # Фильтруем по временному окну
-        now = datetime.now(timezone.utc)
-        start = now - timedelta(seconds=ml_settings.feature_window_sec)
-        
-        if not df_bpm.empty:
-            df_bpm = df_bpm[df_bpm["ts"] >= start]
-        
-        if not df_ua.empty:
-            df_ua = df_ua[df_ua["ts"] >= start]
-        else:
-            # Создаем пустой DataFrame с теми же временными метками
+        if df_ua.empty:
             df_ua = pd.DataFrame({
-                "ts": df_bpm["ts"] if not df_bpm.empty else [],
+                "ts": df_bpm["ts"],
                 "value": np.nan
             })
         
-        if df_bpm.empty:
-            return None
-        
-        # Ресэмплинг и выравнивание
         uni = resample_uniform(df_bpm, df_ua)
         uni = basic_qc(uni)
-        
+
         if len(uni) < ml_settings.min_window_points:
+            logger.warning(f"Session {session_id}: Only {len(uni)} points after resampling, need {ml_settings.min_window_points}")
             return None
         
-        # Вычисление признаков
         feats = compute_ctg_features_window(uni[["t_sec", "bpm", "ua"]])
         
-        # Предсказание риска
         prob = float(self.predict_fn(feats))
         band = "normal" if prob < 0.2 else ("elevated" if prob < 0.5 else "high")
         
-        # Сохраняем результат в Redis
+        now = datetime.now(timezone.utc)
         self.session_manager.update_risk(session_id, prob, band, now)
         
-        # Детекция аномалий
         anoms = detect_anomalies(uni[["t_sec", "bpm", "ua"]])
         
-        # Baseline для графика
         bl = rolling_baseline(uni["bpm"].to_numpy(float), ml_settings.baseline_roll_sec).tolist()
         
-        # События с таймстампами
         ts_series = pd.to_datetime(uni["ts"])
         decel_events = []
         
@@ -151,12 +162,6 @@ class RealtimeProcessorRedis:
         }
     
     def get_session_status(self, session_id: str) -> Optional[dict]:
-        """
-        Получить статус сессии
-        
-        Returns:
-            Словарь с информацией о сессии или None
-        """
         session = self.session_manager.get_session(session_id)
         
         if session is None:
@@ -176,12 +181,6 @@ class RealtimeProcessorRedis:
         }
     
     def cleanup_old_sessions(self, inactive_hours: int = 24):
-        """
-        Очистка неактивных сессий
-        
-        Args:
-            inactive_hours: Количество часов неактивности для удаления
-        """
         cutoff = datetime.utcnow() - timedelta(hours=inactive_hours)
         
         for session_id in self.session_manager.get_all_sessions():

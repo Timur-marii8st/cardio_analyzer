@@ -1,13 +1,38 @@
 from fastapi import APIRouter, HTTPException, Query, Depends
 from datetime import datetime
-from typing import Optional
+from typing import Optional, List
 import pandas as pd
 import numpy as np
 
-from ..deps import get_storage
+from ..deps import get_storage, get_streaming_service
+from ..auth import get_current_user, TokenData
 from packages.ctg_core.processing import resample_uniform, basic_qc, rolling_baseline
 
 router = APIRouter(prefix="/v1", tags=["history"])
+
+@router.get("/sessions", response_model=List[dict])
+def list_sessions(
+    streaming = Depends(get_streaming_service),
+    current_user: TokenData = Depends(get_current_user)
+):
+    """
+    Retrieve a list of all active sessions from the streaming service (Redis).
+    """
+    session_ids = streaming.rt.session_manager.get_all_sessions()
+    sessions_with_details = []
+    for sid in session_ids:
+        status = streaming.get_status(sid)
+        if status:
+            sessions_with_details.append({
+                "id": sid,
+                "updated_at": status.get("updated_at"),
+                "bpm_samples": status.get("bpm_samples", 0),
+                "ua_samples": status.get("ua_samples", 0)
+            })
+            
+    sessions_with_details.sort(key=lambda x: x.get('updated_at') or '', reverse=True)
+    return sessions_with_details
+
 
 @router.get("/sessions/{session_id}/signals")
 def get_signals(

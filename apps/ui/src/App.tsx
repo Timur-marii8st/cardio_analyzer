@@ -1,12 +1,11 @@
-// apps/ui/src/App.tsx
-import React, { useState, useCallback, useMemo } from "react"; // <-- Добавьте useMemo
+import React, { useState, useCallback, useMemo, useEffect } from "react";
 import CtgChart from "./components/CtgChart";
 import RiskGauge from "./components/RiskGauge";
 import EventTimeline from "./components/EventTimeline";
 import { Login } from "./components/Login";
 import { useAuth } from "./contexts/AuthContext";
 import { useWebSocket } from "./hooks/useWebSocket";
-import { WS_BASE, uploadChannelCsv } from "./api/api";
+import { WS_BASE, uploadChannelCsv, fetchSessions } from "./api/api";
 
 type RtPayload = {
   ts: string;
@@ -26,16 +25,36 @@ const App: React.FC = () => {
   const [sessionId, setSessionId] = useState("demo-session");
   const [last, setLast] = useState<RtPayload | null>(null);
   const [uploadStatus, setUploadStatus] = useState<string>("");
-  
-  // ИЗМЕНЕНИЕ 1: Храним массивы файлов
   const [bpmFiles, setBpmFiles] = useState<File[]>([]);
   const [uterusFiles, setUterusFiles] = useState<File[]>([]);
+  const [availableSessions, setAvailableSessions] = useState<{id: string}[]>([]);
+
+  useEffect(() => {
+    if (token) {
+      fetchSessions(token)
+        .then(sessions => {
+          if (sessions.length > 0) {
+            setAvailableSessions(sessions);
+            if (!sessions.some(s => s.id === sessionId)) {
+              setSessionId(sessions[0].id);
+            }
+          } else {
+            setAvailableSessions([{id: 'demo-session'}]);
+          }
+        })
+        .catch(err => console.error("Failed to load sessions:", err));
+    }
+  }, [token]);
 
   const handleWebSocketMessage = useCallback((data: RtPayload) => {
     if (data && data.risk && data.series) {
       setLast(data);
     }
   }, []);
+
+  useEffect(() => {
+    setLast(null);
+  }, [sessionId]);
 
   const handleWebSocketError = useCallback((error: Event) => {
     console.error('WebSocket error:', error);
@@ -45,14 +64,13 @@ const App: React.FC = () => {
     return `${WS_BASE}/v1/stream/${encodeURIComponent(sessionId)}`;
   }, [sessionId]);
 
-  const { isConnected } = useWebSocket({
+  const { isConnected, disconnect } = useWebSocket({
     url: webSocketUrl,
     token: token,
     onMessage: handleWebSocketMessage,
     onError: handleWebSocketError,
   });
 
-  // ИЗМЕНЕНИЕ 2: Обновляем обработчики для работы с несколькими файлами
   const handleBpmFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
       setBpmFiles(Array.from(e.target.files));
@@ -65,34 +83,51 @@ const App: React.FC = () => {
     }
   };
 
-  // ИЗМЕНЕНИЕ 3: Обновляем логику загрузки
+  const handleNewSession = () => {
+    disconnect();
+    const newSessionId = `session-${Date.now()}`;
+    setSessionId(newSessionId);
+    setLast(null);
+    setBpmFiles([]);
+    setUterusFiles([]);
+    setUploadStatus("");
+    if (!availableSessions.some(s => s.id === newSessionId)) {
+      setAvailableSessions(prev => [{id: newSessionId}, ...prev]);
+    }
+  };
+  
+  const handleSessionChange = (newSessionId: string) => {
+    if (newSessionId !== sessionId) {
+      disconnect(); // Disconnect from the old session's stream
+      setSessionId(newSessionId); // Set the new session ID
+    }
+  };
+
   const handleUpload = async () => {
     if (!token) {
       setUploadStatus("Please login first");
       return;
     }
-
     if (bpmFiles.length === 0 && uterusFiles.length === 0) {
       setUploadStatus("Please select at least one file");
       return;
     }
-
     setUploadStatus("Uploading...");
-    
     try {
       const promises = [];
-      
       if (bpmFiles.length > 0) {
         promises.push(uploadChannelCsv(sessionId, bpmFiles, "bpm", token));
       }
-      
       if (uterusFiles.length > 0) {
         promises.push(uploadChannelCsv(sessionId, uterusFiles, "uterus", token));
       }
-      
       await Promise.all(promises);
-      
       setUploadStatus("Upload successful! Processing...");
+      setBpmFiles([]);
+      setUterusFiles([]);
+      if (token) {
+          fetchSessions(token).then(setAvailableSessions);
+      }
       setTimeout(() => setUploadStatus(""), 3000);
     } catch (err) {
       setUploadStatus(`Upload failed: ${err}`);
@@ -115,18 +150,27 @@ const App: React.FC = () => {
 
       <div style={{ marginBottom: 16, padding: 16, border: "1px solid #ddd", borderRadius: 8 }}>
         <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 12 }}>
-          <label>Session ID:</label>
-          <input 
-            value={sessionId} 
-            onChange={(e) => setSessionId(e.target.value)} 
-            disabled={isConnected}
-            style={{ flex: 1 }}
-          />
+          <label>Session:</label>
+          <select
+            value={sessionId}
+            onChange={(e) => handleSessionChange(e.target.value)} // Use the new handler
+            style={{ flex: 1, padding: '4px' }}
+          >
+            {availableSessions.map(session => (
+              <option key={session.id} value={session.id}>
+                {session.id}
+              </option>
+            ))}
+          </select>
+          <button onClick={handleNewSession}> {/* <-- Remove 'disabled' prop */}
+            New Session
+          </button>
           <span style={{ color: isConnected ? "green" : "orange" }}>
-            {isConnected ? "● Connected" : "○ Connecting..."}
+            {isConnected ? "● Connected" : "○ Disconnected"} {/* Updated text for clarity */}
           </span>
         </div>
 
+        
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
           <div>
             <label style={{ display: "block", marginBottom: 4, fontWeight: "bold" }}>
@@ -136,12 +180,10 @@ const App: React.FC = () => {
               type="file" 
               accept=".csv,.tsv" 
               onChange={handleBpmFileChange}
-              multiple // <-- ИЗМЕНЕНИЕ 4: Разрешаем выбор нескольких файлов
+              multiple
             />
-            {/* ИЗМЕНЕНИЕ 5: Отображаем количество выбранных файлов */}
             {bpmFiles.length > 0 && <div style={{ fontSize: 12, color: "green", marginTop: 4 }}>✓ {bpmFiles.length} file(s) selected</div>}
           </div>
-
           <div>
             <label style={{ display: "block", marginBottom: 4, fontWeight: "bold" }}>
               Uterus File(s) (Contractions):
@@ -150,15 +192,14 @@ const App: React.FC = () => {
               type="file" 
               accept=".csv,.tsv" 
               onChange={handleUterusFileChange}
-              multiple // <-- ИЗМЕНЕНИЕ 4: Разрешаем выбор нескольких файлов
+              multiple
             />
             {uterusFiles.length > 0 && <div style={{ fontSize: 12, color: "green", marginTop: 4 }}>✓ {uterusFiles.length} file(s) selected</div>}
           </div>
         </div>
-
         <button 
           onClick={handleUpload}
-          disabled={bpmFiles.length === 0 && uterusFiles.length === 0} // <-- ИЗМЕНЕНИЕ 6: Обновляем условие
+          disabled={bpmFiles.length === 0 && uterusFiles.length === 0}
           style={{
             width: "100%",
             padding: 12,
@@ -171,7 +212,6 @@ const App: React.FC = () => {
         >
           Upload Files
         </button>
-
         {uploadStatus && (
           <div style={{ 
             marginTop: 8, 
