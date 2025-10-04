@@ -5,9 +5,11 @@
 [English](#english) | [Русский](#русский)
 
 <a name="english"></a>
-## Fetal Health Monitoring System (CTG Analyzer)
+## Fetal Health Monitoring System (CTG Analyzer) (PR-AUC=0.9796!!!)
 
 An advanced system for the real-time analysis of fetal cardiotocography (CTG). The application visualizes CTG data, utilizes a machine learning model to predict the risk of hypoxia, and automatically detects abnormal events like decelerations.
+
+The full ML pipeline: https://www.kaggle.com/code/marii8st/itelma-task-fetal-health-classifi
 
 ### Key Features
 
@@ -173,9 +175,11 @@ time_sec,value
 ---
 
 <a name="русский"></a>
-## Система мониторинга состояния плода (CTG Analyzer)
+## Система мониторинга состояния плода (CTG Analyzer) (PR-AUC=0.9796!!!)
 
 Продвинутая система для анализа кардиотокографии (КТГ) плода в реальном времени. Приложение визуализирует данные КТГ, использует модель машинного обучения для прогнозирования риска гипоксии и автоматически обнаруживает аномальные события, такие как децелерации.
+
+Полный ML пайплайн: https://www.kaggle.com/code/marii8st/itelma-task-fetal-health-classifi
 
 ### Основные возможности
 
